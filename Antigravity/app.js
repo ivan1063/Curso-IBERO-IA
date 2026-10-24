@@ -40,101 +40,119 @@ document.addEventListener('DOMContentLoaded', () => {
     calculateROI();
   }
 
-  // 2. Interactive Chatbot Simulator Logic
+  // 2. Conversational assistant backed by the site's server-side knowledge.
   const chatBody = document.getElementById('chatBody');
   const chatInput = document.getElementById('chatInput');
   const btnSend = document.getElementById('btnSend');
   const quickButtons = document.querySelectorAll('.quick-btn');
-
-  const botResponses = {
-    sap: "¡Excelente! En **SAP Integration Suite**, diseñamos iFlows en Cloud Integration (CPI) para conectar S/4HANA con CRM, e-commerce y pasarelas de pago. Manejamos OData, RFCs, BAPIs y scripts Groovy con 99.9% de uptime y manejo automático de excepciones.",
-    bpm: "Para **BPM y Procesos**, implementamos flujos BPMN 2.0 en Camunda y SAP Build Process Automation. Automatizamos aprobaciones de compras, altas de empleados y conciliaciones financieras con escalamiento por timers y firmas digitales.",
-    chatbot: "Nuestros **Chatbots Omnicanal** operan en WhatsApp Business Cloud API, Web y Telegram. Tienen IA con RAG conectada a tu ERP/CRM (HubSpot/Salesforce) para calificar prospectos y atender dudas 24/7 con traspaso automático a operadores humanos.",
-    cotizar: "Para cotizar tu proyecto a la medida, puedes agendar una sesión de arquitectura de 20 minutos con nuestro Director de Automatización haciendo clic en el botón 'Agendar Diagnóstico'. ¡Es totalmente gratuito!"
-  };
+  const resetChat = document.getElementById('resetChat');
+  const chatStatus = document.getElementById('chatStatus');
+  const chatError = document.getElementById('chatError');
+  const retryChat = document.getElementById('retryChat');
+  const history = [];
+  let busy = false;
+  let failedQuestion = null;
 
   function appendMessage(sender, text) {
-    const msgDiv = document.createElement('div');
-    msgDiv.className = `chat-msg msg-${sender}`;
-    // Treat user input as text; allow only our simple bold formatting for bot replies.
-    if (sender === 'bot') {
-      text.split(/(\*\*.*?\*\*)/g).forEach(part => {
-        if (part.startsWith('**') && part.endsWith('**')) {
-          const strong = document.createElement('strong');
-          strong.textContent = part.slice(2, -2);
-          msgDiv.appendChild(strong);
-        } else {
-          msgDiv.appendChild(document.createTextNode(part));
-        }
-      });
-    } else {
-      msgDiv.textContent = text;
-    }
-    chatBody.appendChild(msgDiv);
+    const node = document.createElement('div');
+    node.className = `chat-msg msg-${sender}`;
+    node.textContent = text;
+    chatBody.appendChild(node);
     chatBody.scrollTop = chatBody.scrollHeight;
+    return node;
   }
 
-  function handleUserMessage(userText) {
-    if (!userText || !userText.trim()) return;
-    appendMessage('user', userText);
+  function setBusy(value) {
+    busy = value;
+    btnSend.disabled = value;
+    chatInput.disabled = value;
+    resetChat.disabled = value;
+    quickButtons.forEach(btn => { btn.disabled = value; });
+    chatBody.setAttribute('aria-busy', String(value));
+    chatStatus.textContent = value ? 'Consultando la información del sitio…' : 'Basado en el contenido de esta página';
+  }
 
-    // Bot Thinking indicator
-    const typingDiv = document.createElement('div');
-    typingDiv.className = 'chat-msg msg-bot';
-    typingDiv.innerHTML = '<em>Escribiendo...</em>';
-    typingDiv.id = 'botTyping';
-    chatBody.appendChild(typingDiv);
-    chatBody.scrollTop = chatBody.scrollHeight;
-
-    setTimeout(() => {
-      const typingEl = document.getElementById('botTyping');
-      if (typingEl) typingEl.remove();
-
-      const lower = userText.toLowerCase();
-      let response = "Entendido. Como agencia especializada, podemos crear una solución combinada de SAP Integration Suite, flujos BPM y Chatbots para resolver ese desafío en semanas. ¿Te gustaría agendar una demo técnica?";
-
-      if (lower.includes('sap') || lower.includes('btp') || lower.includes('cpi') || lower.includes('iflow')) {
-        response = botResponses.sap;
-      } else if (lower.includes('bpm') || lower.includes('proceso') || lower.includes('camunda') || lower.includes('flujo')) {
-        response = botResponses.bpm;
-      } else if (lower.includes('bot') || lower.includes('whatsapp') || lower.includes('chat') || lower.includes('ia')) {
-        response = botResponses.chatbot;
-      } else if (lower.includes('precio') || lower.includes('cotiz') || lower.includes('costo') || lower.includes('demo')) {
-        response = botResponses.cotizar;
+  async function handleUserMessage(text, retry = false) {
+    const question = text?.trim();
+    if (busy || !question) return;
+    if (question.length > 2000) {
+      chatError.textContent = 'Escribe hasta 2000 caracteres por mensaje.';
+      chatError.hidden = false;
+      return;
+    }
+    if (!retry) appendMessage('user', question);
+    chatInput.value = '';
+    chatError.hidden = true;
+    retryChat.hidden = true;
+    failedQuestion = null;
+    setBusy(true);
+    const pending = appendMessage('bot', 'Estoy revisando la información del sitio…');
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 35000);
+    try {
+      // Bound both turn count and UTF-8 request bytes; keep the current question.
+      const messages = [...history.slice(-10), { role: 'user', content: question }];
+      const encoder = new TextEncoder();
+      while (messages.length > 1 && encoder.encode(JSON.stringify({ messages })).byteLength > 16000) {
+        messages.splice(0, 2);
       }
-
-      appendMessage('bot', response);
-    }, 600);
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages }),
+        signal: controller.signal
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(response.status === 429
+        ? 'Has enviado varias consultas. Espera un minuto antes de volver a intentarlo.'
+        : data.error || 'El asistente no está disponible en este momento. Intenta de nuevo.');
+      if (typeof data.reply !== 'string' || !data.reply.trim()) throw new Error('No recibí una respuesta. Intenta de nuevo.');
+      pending.textContent = data.reply;
+      history.push({ role: 'user', content: question }, { role: 'assistant', content: data.reply });
+      if (history.length > 10) history.splice(0, history.length - 10);
+    } catch (error) {
+      pending.remove();
+      failedQuestion = question;
+      chatError.textContent = error.name === 'AbortError'
+        ? 'La consulta tardó demasiado. Puedes volver a intentarlo.'
+        : error.message;
+      chatError.hidden = false;
+      retryChat.hidden = false;
+    } finally {
+      clearTimeout(timeout);
+      setBusy(false);
+      chatBody.scrollTop = chatBody.scrollHeight;
+      chatInput.focus();
+    }
   }
 
   if (btnSend && chatInput) {
-    btnSend.addEventListener('click', () => {
-      handleUserMessage(chatInput.value);
-      chatInput.value = '';
-    });
-
-    chatInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
+    btnSend.addEventListener('click', () => handleUserMessage(chatInput.value));
+    chatInput.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.isComposing) {
+        event.preventDefault();
         handleUserMessage(chatInput.value);
-        chatInput.value = '';
       }
+    });
+    const topics = {
+      sap: '¿Qué servicios de SAP Integration Suite ofrecen?',
+      bpm: '¿Cómo pueden ayudarme con aprobaciones y procesos BPM?',
+      chatbot: '¿Qué canales e integraciones ofrecen para chatbots?',
+      cotizar: '¿Cómo solicito una cotización y qué información debo enviar?'
+    };
+    quickButtons.forEach(btn => btn.addEventListener('click', () => handleUserMessage(topics[btn.getAttribute('data-topic')])));
+    retryChat.addEventListener('click', () => { if (failedQuestion) handleUserMessage(failedQuestion, true); });
+    resetChat.addEventListener('click', () => {
+      if (busy) return;
+      history.length = 0;
+      failedQuestion = null;
+      chatBody.replaceChildren();
+      appendMessage('bot', '¡Hola! Soy el asistente de Nexus Automations. Puedo ayudarte con nuestros servicios, la calculadora de ahorro y cómo solicitar un diagnóstico. ¿Qué te gustaría saber?');
+      chatError.hidden = true;
+      retryChat.hidden = true;
+      chatInput.focus();
     });
   }
-
-  quickButtons.forEach(btn => {
-    btn.addEventListener('click', () => {
-      const topic = btn.getAttribute('data-topic');
-      if (topic === 'sap') {
-        handleUserMessage('¿Cómo integran SAP Integration Suite?');
-      } else if (topic === 'bpm') {
-        handleUserMessage('¿Cómo automatizan procesos con BPM?');
-      } else if (topic === 'chatbot') {
-        handleUserMessage('¿Qué capacidades tienen los chatbots para pymes?');
-      } else if (topic === 'cotizar') {
-        handleUserMessage('Quiero agendar una cotización para mi empresa');
-      }
-    });
-  });
 
   // 3. Modal Booking Logic
   const bookingModal = document.getElementById('bookingModal');

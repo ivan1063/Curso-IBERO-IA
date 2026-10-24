@@ -735,3 +735,20 @@ footer {
 .modal-content input:focus, .modal-content select:focus, .modal-content textarea:focus {
   border-color: var(--primary);
 }
+
+
+/* Conversational assistant */
+.chat-simulator { height: 660px; max-height: 90vh; min-height: 520px; }
+.chat-body { min-height: 150px; }
+.chat-msg { white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-tools, .chat-sources { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .6rem; padding: .65rem 1rem; font-size: .75rem; }
+.chat-tools { border-top: 1px solid var(--border-color); color: var(--text-secondary); }
+.chat-tools button, .chat-sources button, #retryChat { background: #1e293b; border: 1px solid #64748b; border-radius: 8px; color: #e2e8f0; padding: .4rem .6rem; cursor: pointer; font: inherit; }
+.chat-sources a { color: #93c5fd; }
+.chat-notice { font-size: .72rem; line-height: 1.5; color: #cbd5e1; padding: .5rem 1rem 0; }
+.chat-feedback { padding: 0 1rem; font-size: .8rem; color: #fecaca; }
+.chat-feedback p { margin-bottom: .5rem; }
+.chat-feedback button { margin-bottom: .5rem; }
+button:disabled { opacity: .55; cursor: wait; }
+button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid #93c5fd; outline-offset: 3px; }
+@media (max-width: 600px) { .chat-simulator { max-height: none; height: 690px; } .chat-msg { max-width: 95%; } }
