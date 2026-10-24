@@ -56,7 +56,20 @@ document.addEventListener('DOMContentLoaded', () => {
   function appendMessage(sender, text) {
     const msgDiv = document.createElement('div');
     msgDiv.className = `chat-msg msg-${sender}`;
-    msgDiv.innerHTML = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    // Treat user input as text; allow only our simple bold formatting for bot replies.
+    if (sender === 'bot') {
+      text.split(/(\*\*.*?\*\*)/g).forEach(part => {
+        if (part.startsWith('**') && part.endsWith('**')) {
+          const strong = document.createElement('strong');
+          strong.textContent = part.slice(2, -2);
+          msgDiv.appendChild(strong);
+        } else {
+          msgDiv.appendChild(document.createTextNode(part));
+        }
+      });
+    } else {
+      msgDiv.textContent = text;
+    }
     chatBody.appendChild(msgDiv);
     chatBody.scrollTop = chatBody.scrollHeight;
   }
@@ -129,6 +142,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const closeModalBtn = document.getElementById('closeModalBtn');
   const bookingForm = document.getElementById('bookingForm');
   const formSuccessAlert = document.getElementById('formSuccessAlert');
+  const formErrorAlert = document.getElementById('formErrorAlert');
 
   openModalBtns.forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -152,18 +166,37 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   if (bookingForm) {
-    bookingForm.addEventListener('submit', (e) => {
+    bookingForm.addEventListener('submit', async (e) => {
       e.preventDefault();
-      bookingForm.style.display = 'none';
-      formSuccessAlert.style.display = 'block';
-      setTimeout(() => {
-        bookingModal.classList.remove('active');
-        setTimeout(() => {
-          bookingForm.reset();
-          bookingForm.style.display = 'block';
-          formSuccessAlert.style.display = 'none';
-        }, 500);
-      }, 2500);
+      const submitButton = bookingForm.querySelector('button[type="submit"]');
+      if (submitButton.disabled) return;
+      submitButton.disabled = true;
+      submitButton.textContent = 'Enviando...';
+      formSuccessAlert.style.display = 'none';
+      formErrorAlert.hidden = true;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 20000);
+      try {
+        const response = await fetch('/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams(new FormData(bookingForm)).toString(),
+          signal: controller.signal
+        });
+        if (!response.ok) throw new Error('Submission rejected');
+        bookingForm.reset();
+        formSuccessAlert.style.display = 'block';
+      } catch (error) {
+        formErrorAlert.textContent = error.name === 'AbortError'
+          ? 'No pudimos confirmar el envío a tiempo. Intenta de nuevo en unos minutos.'
+          : 'No se pudo enviar la solicitud. Revisa tu conexión e intenta de nuevo.';
+        formErrorAlert.hidden = false;
+      } finally {
+        clearTimeout(timeout);
+        submitButton.disabled = false;
+        submitButton.textContent = 'Enviar Solicitud de Diagnóstico';
+      }
     });
   }
 });
+
